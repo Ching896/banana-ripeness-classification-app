@@ -18,6 +18,13 @@ st.write(
     "The system applies the background removal preprocessing pipeline before inference."
 )
 
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
+def clear_uploader():
+    """Callback function to reset the file uploader"""
+    st.session_state.uploader_key += 1
+
 @st.cache_resource
 def load_model(choice):
     if choice == "Baseline (Best QWK)":
@@ -124,18 +131,83 @@ model = load_model(model_choice)
 
 input_mode = st.radio(
     "Select Input Method:",
-    ["Upload Image", "Real-Time Webcam"],
+    ["Upload Image(s)", "Real-Time Webcam"],
     horizontal=True
 )
 
-if input_mode == "Upload Image":
-    uploaded_file = st.file_uploader("Upload banana image (.jpg, .jpeg, .png)", type=["jpg", "jpeg", "png"])
-    if uploaded_file is not None:
-        raw_image = Image.open(uploaded_file).convert("RGB")
-        with st.spinner("Processing image"):
-            processed_image, top1_class, top1_conf, results = run_inference(raw_image)
-        display_results(raw_image, processed_image, top1_class, top1_conf, results)
+if input_mode == "Upload Image(s)":
+    uploaded_files = st.file_uploader(
+        "Upload banana image(s) (.jpg, .jpeg, .png)", 
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.uploader_key}"
+    ) 
 
+    if uploaded_files:
+        st.button("🗑️ Clear Images", on_click=clear_uploader)
+
+        if len(uploaded_files) == 1:
+            # Single Image Processing
+            raw_image = Image.open(uploaded_files[0]).convert("RGB")
+            with st.spinner("Processing image..."):
+                processed_image, top1_class, top1_conf, results = run_inference(raw_image)
+            display_results(raw_image, processed_image, top1_class, top1_conf, results)
+            
+        else:
+            # Batch Image Processing
+            st.markdown("---")
+            st.subheader(f"Batch Processing Results ({len(uploaded_files)} images)")
+            
+            progress_bar = st.progress(0)
+            summary_data = []
+            
+            for i, uploaded_file in enumerate(uploaded_files):
+                raw_image = Image.open(uploaded_file).convert("RGB")
+                processed_image, top1_class, top1_conf, results = run_inference(raw_image)
+                
+                summary_data.append({
+                    "File": uploaded_file.name,
+                    "Raw": raw_image,
+                    "Processed": processed_image,
+                    "Prediction": top1_class,
+                    "Confidence": top1_conf,
+                    "Results": results
+                })
+                progress_bar.progress((i + 1) / len(uploaded_files))
+                
+            progress_bar.empty()
+            
+            # Show Summary Metrics dynamically based on classes detected
+            class_counts = {}
+            for item in summary_data:
+                pred = item["Prediction"]
+                class_counts[pred] = class_counts.get(pred, 0) + 1
+                
+            cols = st.columns(len(class_counts))
+            for idx, (cls_name, count) in enumerate(class_counts.items()):
+                cols[idx].metric(label=f"{cls_name.capitalize()} Bananas", value=count)
+                
+            st.markdown("---")
+            
+            # Show Individual Results in Expanders
+            for item in summary_data:
+                with st.expander(f"🍌 {item['File']} — {item['Prediction']} ({item['Confidence']:.2f}%)"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.image(item['Raw'], caption="Raw Input", use_container_width=True)
+                    with c2:
+                        st.image(item['Processed'], caption="Preprocessed Frame", use_container_width=True)
+                    
+                    st.success(f"**Predicted Stage:** {item['Prediction']} | **Top Confidence:** {item['Confidence']:.2f}%")
+                    
+                    # Detailed Percentage Breakdown for Batch Items
+                    res_probs = item['Results'][0].probs
+                    st.markdown("**Full Class Probabilities:**")
+                    for class_idx, class_name in item['Results'][0].names.items():
+                        conf_val = float(res_probs.data[class_idx].item()) * 100
+                        st.write(f"- **{class_name.capitalize()}**: {conf_val:.2f}%")
+                        st.progress(conf_val / 100.0)
+                        
 else:  
     st.write("Live detection — point the camera at a banana. Label updates every few frames.")
     webrtc_streamer(
