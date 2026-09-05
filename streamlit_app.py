@@ -7,21 +7,15 @@ from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 
 st.set_page_config(
-    page_title="Banana Ripeness AI",
+    page_title="Banana Ripeness Classification",
     page_icon="🍌",
     layout="centered"
 )
 
 st.title("🍌 Banana Ripeness Classification")
 st.write(
-    "Upload a fruit image, capture a snapshot or use real-time camera detection. "
+    "Upload a fruit image or use real-time camera detection. "
     "The system applies the background removal preprocessing pipeline before inference."
-)
-
-st.sidebar.header("⚙️ Model Configuration")
-model_choice = st.sidebar.radio(
-    "Select YOLOv8 Version:",
-    ["Baseline (Best QWK)", "Tuned (Highest Accuracy)"]
 )
 
 @st.cache_resource
@@ -31,38 +25,36 @@ def load_model(choice):
     else:
         return YOLO("yolov8_tuned.pt")
 
-model = load_model(model_choice)
-
 def preprocess_frame(pil_image, target_size=(416, 416)):
-    # 1. Convert PIL (RGB) to OpenCV format (BGR)
+    # Convert PIL (RGB) to OpenCV format (BGR)
     img_rgb = np.array(pil_image)
     image_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    # 2. Resize & Median Blur (Noise Suppression)
+    # Resize & Median Blur (Noise Suppression)
     resized = cv2.resize(image_bgr, target_size)
     median = cv2.medianBlur(resized, 5)
 
     enhanced = median
 
-    # 3. HSV Conversion & Otsu's Thresholding on Saturation Channel
+    # HSV Conversion & Otsu's Thresholding on Saturation Channel
     hsv = cv2.cvtColor(enhanced, cv2.COLOR_BGR2HSV)
     saturation = hsv[:, :, 1] # Extract the S channel
     
     # Automatically calculate threshold using Otsu's
     _, banana_mask = cv2.threshold(saturation, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-    # 4. Morphological cleaning (Remove residual noise and fill gaps)
+    # Morphological cleaning (Remove residual noise and fill gaps)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     banana_mask = cv2.morphologyEx(banana_mask, cv2.MORPH_OPEN, kernel, iterations=1)
     banana_mask = cv2.morphologyEx(banana_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    # 5. Keep only the largest connected component (the main fruit)
+    # Keep only the largest connected component (the main fruit)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(banana_mask, connectivity=8)
     if num_labels > 1:
         largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
         banana_mask = np.where(labels == largest_label, 255, 0).astype(np.uint8)
 
-    # 6. Apply mask to isolate the banana on a pure black background
+    # Apply mask to isolate the banana on a pure black background
     banana_only = cv2.bitwise_and(enhanced, enhanced, mask=banana_mask)
 
     # Convert BGR back to RGB for Streamlit display and YOLO input
@@ -83,7 +75,7 @@ def display_results(raw_image, processed_image, top1_class, top1_conf, results):
     with col1:
         st.image(raw_image, caption="Raw Input", use_container_width=True)
     with col2:
-        st.image(processed_image, caption="Preprocessed Frame (Model Input)", use_container_width=True)
+        st.image(processed_image, caption="Preprocessed Frame", use_container_width=True)
 
     st.markdown("---")
     st.subheader("Grading Result")
@@ -100,7 +92,7 @@ def display_results(raw_image, processed_image, top1_class, top1_conf, results):
 class BananaProcessor(VideoProcessorBase):
     def __init__(self):
         self.frame_count = 0
-        self.infer_every_n = 5  # only run YOLO every Nth frame
+        self.infer_every_n = 5 
         self.last_label = "Waiting for detection..."
 
     def recv(self, frame):
@@ -121,9 +113,18 @@ class BananaProcessor(VideoProcessorBase):
         )
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 
+st.markdown("---")
+st.subheader("⚙️ Model Configuration")
+model_choice = st.radio(
+    "Select YOLOv8 Version:",
+    ["Baseline (Best QWK)", "Tuned (Highest Accuracy)"],
+    horizontal=True,
+)
+model = load_model(model_choice)
+
 input_mode = st.radio(
     "Select Input Method:",
-    ["Upload Image", "Webcam Snapshot", "Real-Time Webcam"],
+    ["Upload Image", "Real-Time Webcam"],
     horizontal=True
 )
 
@@ -131,15 +132,7 @@ if input_mode == "Upload Image":
     uploaded_file = st.file_uploader("Upload banana image (.jpg, .jpeg, .png)", type=["jpg", "jpeg", "png"])
     if uploaded_file is not None:
         raw_image = Image.open(uploaded_file).convert("RGB")
-        with st.spinner("Processing image (Otsu's Method & Background Extraction)..."):
-            processed_image, top1_class, top1_conf, results = run_inference(raw_image)
-        display_results(raw_image, processed_image, top1_class, top1_conf, results)
-
-elif input_mode == "Webcam Snapshot":
-    camera_file = st.camera_input("Place a single banana in front of the lens")
-    if camera_file is not None:
-        raw_image = Image.open(camera_file).convert("RGB")
-        with st.spinner("Processing image (Otsu's Method & Background Extraction)..."):
+        with st.spinner("Processing image"):
             processed_image, top1_class, top1_conf, results = run_inference(raw_image)
         display_results(raw_image, processed_image, top1_class, top1_conf, results)
 
