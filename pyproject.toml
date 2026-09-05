@@ -6,6 +6,12 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "streamlit>=1.61.1",
+    "opencv-python-headless",
+    "ultralytics",
+    "pillow",
+    "numpy",
+    "streamlit-webrtc",
+    "av"
 ]
 
 [tool.uv]
