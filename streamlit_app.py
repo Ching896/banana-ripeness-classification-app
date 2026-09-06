@@ -124,7 +124,7 @@ st.markdown("---")
 st.subheader("⚙️ Model Configuration")
 model_choice = st.radio(
     "Select YOLOv8 Version:",
-    ["Baseline (Best QWK)", "Tuned (Highest Accuracy)"],
+    ["Baseline", "Hyperparameter Tuned"],
     horizontal=True,
 )
 model = load_model(model_choice)
